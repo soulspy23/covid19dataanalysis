@@ -3,6 +3,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import matplotlib.dates as mdates
+import altair as alt
+
+
 
 # Load dataset
 @st.cache_data
@@ -150,31 +153,81 @@ else:
         ax.plot(subset["date"], subset["cumulative_total_cases"], label=f"{country} Cases", linewidth=2)
         if show_deaths_line:
             ax.plot(subset["date"], subset["cumulative_total_deaths"], label=f"{country} Deaths", linestyle="--")
+    
     plt.xlabel("Date")
     plt.ylabel("Cumulative Count")
     plt.legend()
     plt.xticks(rotation=45)
     st.pyplot(fig)
 
-    # Top countries by cases (connected to slider, descending order)
+    import altair as alt
+
+    # --- Top cases (descending, ordered) ---
     top_cases = (
         df.groupby("country")["cumulative_total_cases"]
         .max()
-        .sort_values(ascending=False)   # ensure descending order
+        .sort_values(ascending=False)
         .head(show_top)
+        .reset_index()
     )
-    st.subheader(f"Top {show_top} Countries by Cases")
-    st.bar_chart(top_cases.to_frame().sort_values("cumulative_total_cases", ascending=False))
     
-    # Top countries by deaths (connected to slider, descending order)
+    # Preserve order for Altair
+    top_cases["country"] = pd.Categorical(
+        top_cases["country"], categories=top_cases["country"].tolist(), ordered=True
+    )
+    
+    st.subheader(f"Top {show_top} Countries by Cases")
+    
+    cases_chart = (
+        alt.Chart(top_cases)
+        .mark_bar()
+        .encode(
+            x=alt.X("country:N", sort=top_cases["country"].tolist(), title=None),
+            y=alt.Y("cumulative_total_cases:Q", title="Cumulative Cases"),
+            color=alt.Color(
+                "cumulative_total_cases:Q",
+                scale=alt.Scale(range=["#dbeafe", "#1e3a8a"]),  # pale blue → deep blue
+                legend=alt.Legend(title="Cases"),
+            ),
+            tooltip=["country", "cumulative_total_cases"],
+        )
+        .properties(width=40 * len(top_cases), height=400)
+    )
+    
+    st.altair_chart(cases_chart, use_container_width=True)
+    
+    # --- Top deaths (descending, ordered) ---
     top_deaths = (
         df.groupby("country")["cumulative_total_deaths"]
         .max()
-        .sort_values(ascending=False)   # ensure descending order
+        .sort_values(ascending=False)
         .head(show_top)
+        .reset_index()
     )
+    
+    top_deaths["country"] = pd.Categorical(
+        top_deaths["country"], categories=top_deaths["country"].tolist(), ordered=True
+    )
+    
     st.subheader(f"Top {show_top} Countries by Deaths")
-    st.bar_chart(top_deaths.to_frame().sort_values("cumulative_total_deaths", ascending=False))
+    
+    deaths_chart = (
+        alt.Chart(top_deaths)
+        .mark_bar()
+        .encode(
+            x=alt.X("country:N", sort=top_deaths["country"].tolist(), title=None),
+            y=alt.Y("cumulative_total_deaths:Q", title="Cumulative Deaths"),
+            color=alt.Color(
+                "cumulative_total_deaths:Q",
+                scale=alt.Scale(range=["#fee2e2", "#7f1d1d"]),  # pale red → deep red
+                legend=alt.Legend(title="Deaths"),
+            ),
+            tooltip=["country", "cumulative_total_deaths"],
+        )
+        .properties(width=40 * len(top_deaths), height=400)
+    )
+    
+    st.altair_chart(deaths_chart, use_container_width=True)
 
 
     # Scatter Plot - Cases vs Deaths (unchanged)
@@ -193,11 +246,19 @@ else:
     plt.ylabel("Total Deaths")
     st.pyplot(fig)
 
-    # Pie Chart - Proportion of Cases by Top 5 Countries (unchanged)
+    # --- Pie Chart - Top 5 Countries by Cases ---
     st.subheader("Pie Chart - Top 5 Countries by Cases")
+    
     top5_cases = top_cases.head(5)
+    
     fig, ax = plt.subplots()
-    ax.pie(top5_cases, labels=top5_cases.index, autopct="%1.1f%%", startangle=90)
+    # Use the numeric values explicitly
+    ax.pie(
+        top5_cases["cumulative_total_cases"],   # numeric values
+        labels=top5_cases["country"],           # country names
+        autopct="%1.1f%%",
+        startangle=90
+    )
     st.pyplot(fig)
 
     # Continent-level breakdown (unchanged)
@@ -206,42 +267,33 @@ else:
         continent_cases = df.groupby("continent")["cumulative_total_cases"].max().sort_values(ascending=False)
         st.bar_chart(continent_cases)
 
-    # Growth trend (unchanged)
-    st.subheader("Growth Trend - Top Country")
-    top_country = top_cases.index[0]
+    # Growth trend (fixed)
+    st.subheader("Growth Trend - Top Country [USA]")
+    
+    # Use the actual country name from the DataFrame
+    top_country = top_cases.loc[0, "country"]
+    
     top_country_data = df[df["country"] == top_country].sort_values("date").copy()
+    
     fig, ax = plt.subplots(figsize=(12, 6))
-    ax.plot(top_country_data["date"], top_country_data["cumulative_total_cases"], label="Cases", color="blue")
-    ax.plot(top_country_data["date"], top_country_data["cumulative_total_deaths"], label="Deaths", color="red")
+    ax.plot(
+        top_country_data["date"],
+        top_country_data["cumulative_total_cases"],
+        label="Cases",
+        color="blue"
+    )
+    ax.plot(
+        top_country_data["date"],
+        top_country_data["cumulative_total_deaths"],
+        label="Deaths",
+        color="red"
+    )
+    
     ax.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%Y-%m"))
     plt.xticks(rotation=45)
     plt.legend()
     st.pyplot(fig)
-
-    # Bubble chart (unchanged)
-    if {"population", "cumulative_total_cases", "cumulative_total_deaths"}.issubset(df.columns):
-        st.subheader("Bubble Chart - Cases vs Deaths vs Population")
-        merged = summary_data.merge(df[["country", "population"]].drop_duplicates(), on="country")
-        fig, ax = plt.subplots()
-        sns.scatterplot(
-            data=merged,
-            x="cumulative_total_cases",
-            y="cumulative_total_deaths",
-            size="population",
-            alpha=0.6,
-            ax=ax,
-            legend=False
-        )
-        plt.xlabel("Total Cases")
-        plt.ylabel("Total Deaths")
-        st.pyplot(fig)
-
-    # Map (unchanged)
-    if {"Lat", "Long"}.issubset(df.columns):
-        map_data = df[["Lat", "Long"]].dropna()
-        st.subheader("Map View")
-        st.map(map_data)
 
     # Raw data preview (unchanged)
     st.subheader("Raw Data Preview")
